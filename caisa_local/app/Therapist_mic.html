@@ -1,0 +1,478 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>CAISA | Therapist Training → Local Agent</title>
+<style>
+  :root{
+    --bg:#0b1020;--card:#111632;--ink:#e8ebff;--muted:#a5add6;
+    --accent:#8aa3ff;--good:#32d48e;--warn:#ffb147;--bad:#ff6b6b;
+    --line:rgba(255,255,255,.10)
+  }
+  *{box-sizing:border-box}
+  body{margin:0;font-family:ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto;background:linear-gradient(180deg,#0b1020,#0a0f2a);color:var(--ink)}
+  .wrap{max-width:980px;margin:32px auto;padding:24px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:18px;padding:20px;box-shadow:0 10px 30px rgba(0,0,0,.25)}
+  h1{margin:0 0 6px;font-size:24px;letter-spacing:.2px}
+  p.lead{margin:0 0 16px;color:var(--muted)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+  .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
+  label{font-size:12px;color:var(--muted);margin-bottom:6px;display:block}
+  input[type="text"],input[type="url"],textarea,select,input[type="range"]{
+    width:100%;padding:10px 12px;border-radius:12px;border:1px solid var(--line);
+    background:rgba(0,0,0,.25);color:var(--ink);outline:none
+  }
+  textarea{min-height:72px;resize:vertical}
+  .btn{appearance:none;border:0;border-radius:999px;padding:10px 16px;font-weight:600;cursor:pointer;color:#0a0f2a;background:var(--accent);box-shadow:0 8px 16px rgba(138,163,255,.35)}
+  .btn.ghost{background:transparent;color:var(--ink);border:1px solid rgba(255,255,255,.2);box-shadow:none}
+  .btn.warn{background:var(--warn)} .btn.good{background:var(--good)} .btn.bad{background:var(--bad)}
+  .pill{font-size:12px;padding:6px 10px;border-radius:999px;border:1px solid var(--line);color:var(--muted)}
+  .mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}
+  .mt8{margin-top:8px}.mt12{margin-top:12px}.mt16{margin-top:16px}.mt24{margin-top:24px}.mt32{margin-top:32px}
+  audio{width:100%;margin-top:8px}
+  pre{background:#0a0f2a;border:1px solid var(--line);padding:12px;border-radius:12px;overflow:auto;max-height:260px}
+  .footer{color:var(--muted);font-size:12px;margin-top:18px}
+  .topbar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px}
+  .endpoint{font-size:12px;color:var(--muted)}
+  .endpoint code{color:var(--ink);background:#0a0f2a;padding:2px 8px;border-radius:999px;border:1px solid var(--line)}
+  /* mic level bar */
+  .meterWrap{height:10px;background:rgba(255,255,255,.06);border:1px solid var(--line);border-radius:999px;overflow:hidden}
+  .meter{height:100%;width:0%;background:linear-gradient(90deg,#42e695,#3bb2b8)}
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="card">
+      <div class="topbar">
+        <div>
+          <h1>CAISA · Therapist Mic → Local Agent</h1>
+          <p class="lead">Record or go Live → <span class="mono">/turn</span> → ASR → AI client reply → lightweight rater.</p>
+        </div>
+        <div class="endpoint">Endpoint<br><code>http://127.0.0.1:8001/turn</code></div>
+      </div>
+
+      <div class="grid">
+        <div>
+          <label for="webhook">Agent URL</label>
+          <input id="webhook" type="url" placeholder="http://127.0.0.1:8001/turn" />
+        </div>
+        <div>
+          <label for="apikey">Optional Header (x-caisa-key)</label>
+          <input id="apikey" type="text" placeholder="leave blank if not required" />
+        </div>
+      </div>
+
+      <div class="grid mt16">
+        <div>
+          <label for="session">Session ID</label>
+          <input id="session" type="text" />
+        </div>
+        <div>
+          <label for="scenario">Scenario (persona brief)</label>
+          <input id="scenario" type="text" placeholder="first-time intake; social anxiety in group settings" />
+        </div>
+      </div>
+
+      <div class="row mt8" style="gap:16px;align-items:center;">
+        <label class="row" style="gap:8px;align-items:center;margin:0;">
+          <input id="speakToggle" type="checkbox" checked />
+          <span>🔊 Speak client reply</span>
+        </label>
+        <label class="row" style="gap:8px;align-items:center;margin:0;">
+          <input id="liveToggle" type="checkbox" />
+          <span>🎙️ Live (auto-turns on silence)</span>
+        </label>
+      </div>
+      <div class="grid mt8">
+        <div>
+          <label for="voiceSelect">Voice</label>
+          <select id="voiceSelect"></select>
+        </div>
+        <div>
+          <label for="rate">Rate</label>
+          <input id="rate" type="range" min="0.7" max="1.3" step="0.05" value="1.0">
+        </div>
+      </div>
+
+      <div class="mt16">
+        <span id="status" class="pill">idle</span>
+      </div>
+
+      <!-- live mic level -->
+      <div class="mt12">
+        <div class="meterWrap"><div id="meter" class="meter"></div></div>
+      </div>
+
+      <div class="row mt16">
+        <button id="btnRecord" class="btn">● Start</button>
+        <button id="btnStop" class="btn warn" disabled>■ Stop</button>
+        <button id="btnSend" class="btn good" disabled>↑ Send to Agent</button>
+        <button id="btnReset" class="btn ghost" disabled>Reset</button>
+      </div>
+
+      <div class="mt16">
+        <label>Preview</label>
+        <audio id="player" controls></audio>
+        <div class="footer">Captured as <span class="mono">audio/webm; codecs=opus</span>.</div>
+      </div>
+
+      <div class="grid mt24">
+        <div>
+          <label>Request (FormData fields)</label>
+          <pre id="req" class="mono"></pre>
+        </div>
+        <div>
+          <label>Response (JSON)</label>
+          <pre id="res" class="mono"></pre>
+        </div>
+      </div>
+
+      <div class="mt24">
+        <div class="row" style="justify-content:space-between;align-items:center">
+          <label>Session History</label>
+          <div class="row">
+            <button id="btnHist" class="btn ghost">⟳ Refresh</button>
+            <button id="btnClear" class="btn bad">✖ Clear</button>
+          </div>
+        </div>
+        <div id="hist" class="mono" style="margin-top:8px; white-space:pre-wrap;"></div>
+      </div>
+
+      <div class="footer mt12">
+        Tip: Use HTTPS for mic access. Most browsers require a secure origin for <span class="mono">getUserMedia</span>.
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  const els = {
+    webhook: document.getElementById('webhook'),
+    apikey: document.getElementById('apikey'),
+    session: document.getElementById('session'),
+    scenario: document.getElementById('scenario'),
+    status: document.getElementById('status'),
+    btnRecord: document.getElementById('btnRecord'),
+    btnStop: document.getElementById('btnStop'),
+    btnSend: document.getElementById('btnSend'),
+    btnReset: document.getElementById('btnReset'),
+    player: document.getElementById('player'),
+    req: document.getElementById('req'),
+    res: document.getElementById('res'),
+    meter: document.getElementById('meter'),
+    liveToggle: document.getElementById('liveToggle'),
+  };
+
+  // ---- SpeechSynthesis helpers ----
+  const tts = {
+    voices: [],
+    init() {
+      const select = document.getElementById('voiceSelect');
+      const load = () => {
+        this.voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
+        select.innerHTML = '';
+        this.voices.forEach((v,i) => {
+          const opt = document.createElement('option');
+          opt.value = i; opt.textContent = `${v.name} (${v.lang})`;
+          select.appendChild(opt);
+        });
+      };
+      load(); speechSynthesis.onvoiceschanged = load;
+    },
+    speak(text) {
+      if (!document.getElementById('speakToggle').checked || !text) return;
+      speechSynthesis.cancel();
+      const u = new SpeechSynthesisUtterance(String(text).trim());
+      const voices = speechSynthesis.getVoices().filter(v => v.lang.startsWith('en'));
+      const idx = parseInt(document.getElementById('voiceSelect').value || '0', 10);
+      if (voices[idx]) u.voice = voices[idx];
+      u.rate = parseFloat(document.getElementById('rate').value || '1.0');
+      u.pitch = 1.0; u.lang = (u.voice && u.voice.lang) || 'en-US';
+      u.onend = function(){
+          console.log('SPEECH DONE')
+          awaitingResponse = false;
+      }
+      speechSynthesis.speak(u);
+    }
+  };
+  tts.init();
+
+  // Defaults + persistence
+  const LAST = JSON.parse(localStorage.getItem('caisa_demo') || '{}');
+  els.webhook.value = LAST.webhook || 'http://127.0.0.1:8001/turn';
+  els.session.value = LAST.session || `demo-${Math.random().toString(36).slice(2,8)}`;
+  els.scenario.value = LAST.scenario || 'general intake: mild anxiety';
+  function saveState(){
+    localStorage.setItem('caisa_demo', JSON.stringify({
+      webhook: els.webhook.value.trim(),
+      session: els.session.value.trim(),
+      scenario: els.scenario.value.trim(),
+    }));
+  }
+
+  // Live mode state
+  let liveMode = false;
+  let mediaRecorder = null, chunks = [], blob = null, audioStream = null, rafId = null, analyser = null, dataArray = null;
+  let lastChunk = null;          // latest finalized chunk from requestData()
+  let silenceMs = 0;
+  let awaitingResponse = false;
+  let sending = false;
+  let lastSendAt = 0;
+  const MIN_TURN_GAP_MS = 700;   // debounce between silent-turns
+  const SILENCE_THRESHOLD = 0.025;  // tweak 0.015–0.03
+  const END_SPEECH_MS = 1200;       // ms of continuous silence to end a turn
+
+  function setStatus(text, color){
+    els.status.textContent = text;
+    els.status.style.borderColor = 'rgba(255,255,255,.25)';
+    if (color) els.status.style.background = color;
+  }
+
+  // ---- Simple mic level bar (AnalyserNode) + silence detection in live mode ----
+  function startMeter(stream){
+    const ac = new (window.AudioContext || window.webkitAudioContext)();
+    const src = ac.createMediaStreamSource(stream);
+    analyser = ac.createAnalyser();
+    analyser.fftSize = 512;
+    dataArray = new Uint8Array(analyser.frequencyBinCount);
+    src.connect(analyser);
+    let lastTick = performance.now();
+    function tick(){
+      if(awaitingResponse) return;
+      analyser.getByteTimeDomainData(dataArray);
+      // quick RMS
+      let sum=0; for (let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum+=v*v; }
+      const rms=Math.sqrt(sum/dataArray.length);
+      const pct=Math.min(100, Math.max(2, Math.round(rms*160)));
+      els.meter.style.width = pct + '%';
+
+      // silence detection with time delta
+      if (liveMode) {
+        const now = performance.now();
+        const dt = now - lastTick; lastTick = now;
+        if (rms < SILENCE_THRESHOLD) silenceMs += dt; else silenceMs = 0;
+        if (silenceMs >= END_SPEECH_MS) {
+          finalizeAndSendLiveTurn();
+          awaitingResponse = true;
+          silenceMs = 0;
+        }
+      } else {
+        lastTick = performance.now();
+      }
+      rafId = requestAnimationFrame(tick);
+    }
+    tick();
+  }
+  function stopMeter(){
+    cancelAnimationFrame(rafId); els.meter.style.width='0%';
+  }
+
+  // ---- History helpers ----
+  async function fetchHistory() {
+    const sid = (document.getElementById('session').value || '').trim();
+    const turnUrl = (document.getElementById('webhook').value || '').trim();
+    if (!sid || !turnUrl) return;
+
+    const apiRoot = turnUrl.replace(/\/turn\/?$/,'').replace(/\/$/,'');
+    const histUrl = `${apiRoot}/session/history?session_id=${encodeURIComponent(sid)}`;
+
+    try {
+      const res = await fetch(histUrl, { method: 'GET' });
+      const data = await res.json();
+      const box = document.getElementById('hist');
+      if (!res.ok) { box.textContent = `Error ${res.status}: ${JSON.stringify(data)}`; return; }
+
+      const lines = [];
+      (data.turns || []).forEach((t, i) => {
+        const ts = new Date(Number(t.turn_ts || 0)).toLocaleTimeString();
+        if (t.therapist_text) lines.push(`[${i+1}] Therapist (${ts}): ${t.therapist_text}`);
+        if (t.client_text)    lines.push(`      Client   (${ts}): ${t.client_text}`);
+        lines.push('');
+      });
+      box.textContent = lines.length ? lines.join('\n') : '(no turns yet)';
+    } catch (e) {
+      document.getElementById('hist').textContent = String(e);
+    }
+  }
+
+  async function clearHistory() {
+    const sid = (document.getElementById('session').value || '').trim();
+    const turnUrl = (document.getElementById('webhook').value || '').trim();
+    if (!sid || !turnUrl) return;
+
+    const apiRoot = turnUrl.replace(/\/turn\/?$/,'').replace(/\/$/,'');
+    const clearUrl = `${apiRoot}/session/clear`;
+
+    const form = new FormData();
+    form.append('session_id', sid);
+
+    try {
+      const res = await fetch(clearUrl, { method: 'POST', body: form });
+      const data = await res.json();
+      document.getElementById('hist').textContent = res.ok ? '(cleared)' : `Error ${res.status}: ${JSON.stringify(data)}`;
+    } catch (e) {
+      document.getElementById('hist').textContent = String(e);
+    }
+  }
+
+  // ---- Recording flow ----
+  els.liveToggle.addEventListener('change', (e) => {
+    liveMode = e.target.checked;
+    setStatus(liveMode ? 'live…' : 'idle', liveMode ? '#1c274a' : undefined);
+  });
+
+  async function startRecording(){
+    try{
+      const optionsSupported = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus');
+      const recOptions = optionsSupported ? { mimeType:'audio/webm;codecs=opus' } : {};
+
+      audioStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+      mediaRecorder = new MediaRecorder(audioStream, recOptions);
+      chunks = [];
+      lastChunk = null;
+
+      mediaRecorder.ondataavailable = e => {
+        if (!e.data || e.data.size===0) return;
+        if (liveMode) {
+          // keep only the latest finalized fragment
+          lastChunk = e.data;
+        } else {
+          chunks.push(e.data);
+        }
+      };
+
+      // In live mode, no timeslice; we requestData() on silence to get a fresh fragment
+      mediaRecorder.start();
+      startMeter(audioStream);
+      setStatus(liveMode ? 'live…' : 'recording…', '#1c274a');
+      els.btnRecord.disabled = true; els.btnStop.disabled=false;
+      if (!liveMode) els.btnSend.disabled = true; // enabled after manual stop
+    }catch(err){
+      setStatus('mic permission denied','#5c1c1c');
+      console.error(err); alert('Microphone access failed. Use HTTPS and allow mic permissions.');
+    }
+  }
+
+  function stopRecording(){
+    if (mediaRecorder && mediaRecorder.state !== 'inactive'){
+      mediaRecorder.stop();
+      if (audioStream) { audioStream.getTracks().forEach(t=>t.stop()); audioStream=null; }
+      stopMeter();
+      if (!liveMode) {
+        const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+          ? 'audio/webm;codecs=opus' : 'audio/webm';
+        blob = new Blob(chunks, { type: mime });
+        els.player.src = URL.createObjectURL(blob);
+        els.btnSend.disabled = (blob.size === 0);
+        els.btnReset.disabled = false;
+        setStatus(`ready to send (${Math.round(blob.size/1024)} KB)`, '#26305c');
+      } else {
+        setStatus('idle');
+      }
+      els.btnStop.disabled=true; els.btnRecord.disabled=false;
+    }
+  }
+
+  function resetAll(){
+    blob=null; chunks=[]; lastChunk=null;
+    els.player.src='';
+    els.btnSend.disabled=true; els.btnReset.disabled=true; els.res.textContent='';
+    setStatus('idle'); stopMeter();
+  }
+
+  // Manual send (non-live)
+  async function sendToAgent(){
+    if (liveMode) { alert('Disable Live to use manual Send.'); return; }
+    if (!blob || blob.size===0){ alert('Please record something first'); return; }
+    await postBlob(blob);
+  }
+
+  // Live helper: request a fresh fragment and send only that
+  async function finalizeAndSendLiveTurn(){
+    try {
+      if (!mediaRecorder || mediaRecorder.state === 'inactive') return;
+      const now = performance.now();
+      if (now - lastSendAt < MIN_TURN_GAP_MS) return; // debounce
+      if (sending) return;
+      sending = true;
+      lastSendAt = now;
+
+      // Ask recorder to flush a fresh fragment
+      const got = await new Promise((resolve) => {
+        const handler = (e) => {
+          if (e.data && e.data.size > 0) lastChunk = e.data;  // capture fresh chunk
+          mediaRecorder.removeEventListener('dataavailable', handler);
+          resolve(!!lastChunk);
+        };
+        mediaRecorder.addEventListener('dataavailable', handler, { once: true });
+        try { mediaRecorder.requestData(); } catch { resolve(false); }
+      });
+
+      if (!got || !lastChunk || lastChunk.size < 2048) { sending = false; return; }
+
+      const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
+        ? 'audio/webm;codecs=opus' : 'audio/webm';
+      const liveBlob = new Blob([lastChunk], { type: mime });
+      lastChunk = null;
+
+      await postBlob(liveBlob, /*isLive*/true);
+    } catch (err) {
+      console.error(err);
+      setStatus('network error','#5c1c1c');
+      els.res.textContent = String(err);
+    } finally {
+      sending = false;
+    }
+  }
+
+  // Core POST logic (shared)
+  async function postBlob(theBlob, isLive=false){
+    const url = (els.webhook.value || '').trim();
+    if (!url){ alert('Enter your Agent URL'); return; }
+    saveState();
+
+    const form = new FormData();
+    const file = new File([theBlob], `therapist_${Date.now()}.webm`, { type: theBlob.type || 'audio/webm' });
+    form.append('file', file);
+    form.append('session_id', els.session.value.trim());
+    form.append('scenario', els.scenario.value.trim());
+
+    els.req.textContent =
+      `Fields -> file: ${file.name} (${file.type}, ${Math.round(file.size/1024)} KB)\n`+
+      `session_id: ${form.get('session_id')}\nscenario: ${form.get('scenario')}`;
+
+    setStatus('uploading…','#1c274a');
+    try{
+      const headers = {};
+      const k = (document.getElementById('apikey').value||'').trim();
+      if (k) headers['x-caisa-key']=k;
+
+      const res = await fetch(url, { method:'POST', body:form, headers });
+      const contentType = res.headers.get('content-type') || '';
+      let payload = contentType.includes('application/json') ? await res.json() : await res.text();
+      els.res.textContent = typeof payload==='string' ? payload : JSON.stringify(payload,null,2);
+      setStatus(res.ok ? (liveMode ? 'live…' : 'uploaded') : `error ${res.status}`, res.ok ? '#1f3b2e' : '#5c1c1c');
+
+      const clientText = (payload && typeof payload==='object') ? (payload.client_text || '') : '';
+      tts.speak(clientText);
+      fetchHistory();
+    }catch(err){
+      console.error(err); setStatus('network error','#5c1c1c'); els.res.textContent = String(err);
+    }
+  }
+
+  // Wire up
+  document.getElementById('btnRecord').addEventListener('click', startRecording);
+  document.getElementById('btnStop').addEventListener('click', stopRecording);
+  document.getElementById('btnSend').addEventListener('click', sendToAgent);
+  document.getElementById('btnReset').addEventListener('click', resetAll);
+  document.getElementById('btnHist').addEventListener('click', fetchHistory);
+  document.getElementById('btnClear').addEventListener('click', clearHistory);
+
+  // initial history pull on page load
+  fetchHistory();
+})();
+</script>
+</body>
+</html>

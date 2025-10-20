@@ -1,0 +1,18 @@
+fastapi==0.115.0
+uvicorn[standard]==0.30.6
+python-multipart==0.0.9
+
+# ASR (local Whisper)
+faster-whisper==1.0.0
+
+# Prompting & parsing
+pydantic==2.9.2
+
+# Simple storage
+sqlite-utils==3.36
+
+# (Optional) Audio helpers for TTS/format tweaks later
+soundfile==0.12.1
+pydub==0.25.1
+
+requests==2.32.3
