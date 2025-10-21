@@ -189,9 +189,31 @@
       if (voices[idx]) u.voice = voices[idx];
       u.rate = parseFloat(document.getElementById('rate').value || '1.0');
       u.pitch = 1.0; u.lang = (u.voice && u.voice.lang) || 'en-US';
-      u.onend = function(){
+      u.onend = async function(){
           console.log('SPEECH DONE')
           awaitingResponse = false;
+          const optionsSupported = MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus');
+          const recOptions = optionsSupported ? { mimeType:'audio/webm;codecs=opus' } : {};
+
+          audioStream = await navigator.mediaDevices.getUserMedia({ audio:true });
+          mediaRecorder = new MediaRecorder(audioStream, recOptions);
+          chunks = [];
+          lastChunk = null;
+
+          mediaRecorder.ondataavailable = e => {
+            if (!e.data || e.data.size===0) return;
+            if (liveMode) {
+              // keep only the latest finalized fragment
+              lastChunk = e.data;
+            } else {
+              chunks.push(e.data);
+            }
+          };
+
+          // In live mode, no timeslice; we requestData() on silence to get a fresh fragment
+          mediaRecorder.start();
+          startMeter(audioStream);
+          setStatus(liveMode ? 'live…' : 'recording…', '#1c274a');
       }
       speechSynthesis.speak(u);
     }
@@ -217,6 +239,7 @@
   let lastChunk = null;          // latest finalized chunk from requestData()
   let silenceMs = 0;
   let awaitingResponse = false;
+  let startedSpeaking  = false;
   let sending = false;
   let lastSendAt = 0;
   const MIN_TURN_GAP_MS = 700;   // debounce between silent-turns
@@ -239,7 +262,8 @@
     src.connect(analyser);
     let lastTick = performance.now();
     function tick(){
-      if(awaitingResponse) return;
+        console.log('tick : awaitingResponse', awaitingResponse)
+      // if(awaitingResponse) return;
       analyser.getByteTimeDomainData(dataArray);
       // quick RMS
       let sum=0; for (let i=0;i<dataArray.length;i++){ const v=(dataArray[i]-128)/128; sum+=v*v; }
@@ -248,13 +272,28 @@
       els.meter.style.width = pct + '%';
 
       // silence detection with time delta
-      if (liveMode) {
+      if (liveMode && !awaitingResponse) {
         const now = performance.now();
         const dt = now - lastTick; lastTick = now;
-        if (rms < SILENCE_THRESHOLD) silenceMs += dt; else silenceMs = 0;
+        console.log('RMS:', rms, ' SILENCE_THRESHOLD:', SILENCE_THRESHOLD, rms > SILENCE_THRESHOLD)
+        if(rms > SILENCE_THRESHOLD) {
+            startedSpeaking = true;
+        }
+
+        if (rms < SILENCE_THRESHOLD && startedSpeaking) {
+            silenceMs += dt;
+        }
+        else {
+            silenceMs = 0;
+        }
+        // console.log('Speaking')
+        // if (silenceMs >= END_SPEECH_MS) {
+        //     console.log('Now stopped speaking');
+        // }
         if (silenceMs >= END_SPEECH_MS) {
           finalizeAndSendLiveTurn();
           awaitingResponse = true;
+          startedSpeaking = false;
           silenceMs = 0;
         }
       } else {
@@ -414,6 +453,7 @@
       const mime = (MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported('audio/webm;codecs=opus'))
         ? 'audio/webm;codecs=opus' : 'audio/webm';
       const liveBlob = new Blob([lastChunk], { type: mime });
+      els.player.src = URL.createObjectURL(liveBlob);
       lastChunk = null;
 
       await postBlob(liveBlob, /*isLive*/true);
